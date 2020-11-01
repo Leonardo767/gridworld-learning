@@ -57,7 +57,7 @@ class GridGame:
     def get_reward(self, a_t):
         # all actions cost -1 reward
         for b in range(self.opt.bs):
-            self.reward[b] = self.reward[b] - 1
+            # self.reward[b] = self.reward[b] - 1
             for n in range(self.opt.game_nagents):
                 # assess current location
                 curr_loc = self.agent_locs[b, n]

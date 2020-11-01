@@ -3,6 +3,7 @@ import json
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 from rl_utils.dotdic import DotDic
 from env.grid_game_flat import GridGame
@@ -21,26 +22,30 @@ class Agents:
         self.info = 1
 
         # learning params
-        self.epsilon = 0.8
+        self.epsilon = 0.1
 
         # init table
-        self.Q = torch.zeros(world_dim ** 2, len(self.actions)) + 10
+        self.Q = torch.zeros(dim ** 2, len(self.actions)) + 10
         self.reset_history()
 
     def choose_action(self):
         s = self.world.get_state(self.info)
-        self.step_records['states_visited'].append(s)
         if np.random.uniform(0, 1) <= self.epsilon:
             # explore
             return np.random.choice(self.actions)
         # greedy
-        return torch.argmax(self.Q[s]).item()
+        u_vals = self.Q[s]
+        u = np.random.choice(np.flatnonzero(u_vals == u_vals.max()))
+        return u
 
     def take_action(self, u):
         self.step_records.actions_taken.append(u)
         r, terminate = self.world.get_reward(u)
         r = r[0, 0].item()
         self.step_records.reward_obtained.append(r)
+        # log new state
+        s = self.world.get_state(self.info)
+        self.step_records.states_visited.append(s)
         self.terminated = bool(terminate[0])
         return r
 
@@ -57,13 +62,15 @@ class Agents:
 class Arena:
     def __init__(self, opt, agents):
         self.a = agents
+        self.opt = opt
         # train params
         self.num_episodes = opt.nepisodes
-        self.alpha = 0.2
+        self.alpha = 0.5
         self.gamma = 0.9
+        self.perf_hist = [0 for _ in range(self.num_episodes)]
 
     def run_episode(self):
-        max_steps = 100000
+        max_steps = 1000
         i = 0
         while not self.a.terminated and i < max_steps:
             u = self.a.choose_action()
@@ -71,12 +78,13 @@ class Arena:
             r = self.a.take_action(u)
             # print(r)
             i += 1
-        print(i)
+        return i
 
     def train(self):
-        for e in range(self.num_episodes):
+        for e in tqdm(range(self.num_episodes)):
             # generate episode data
-            self.run_episode()
+            T = self.run_episode()
+            self.perf_hist[e] = T
             s_hist = self.a.step_records.states_visited
             u_hist = self.a.step_records.actions_taken
             r_hist = self.a.step_records.reward_obtained
@@ -91,21 +99,22 @@ class Arena:
             # backpropagate values
             for t in range(len(s_hist[1:])):
                 sprime = s_hist[t - 1]
-                uprime = u_hist[t - 1]
-                q_prime = torch.argmax(self.a.Q[sprime, uprime]).item()
+                q_prime = torch.max(self.a.Q[sprime]).item()
                 s = s_hist[t]
                 u = u_hist[t]
                 r = r_hist[t]
                 q_i = self.a.Q[s, u]
                 q_ii = q_i + self.alpha * (r + self.gamma * q_prime - q_i)
                 self.a.Q[s, u] = q_ii
-            # self.show_table(self.a.Q)
+            self.show_table(self.a.Q)
             self.a.reset_history()
         # print(self.a.Q)
         self.show_table(self.a.Q)
+        plt.plot(self.perf_hist)
+        plt.show()
 
     def show_table(self, q, vid=False):
-        dim = 5
+        dim = self.opt.world_dim
         if vid:
             os.system('cls' if os.name == 'nt' else "printf '\033c'")
         grid_idx = -1
@@ -127,16 +136,16 @@ opt = DotDic({
     'game_action_space': 5,
     'game_comm_bits': 0,
     'nepisodes': 100,
-    'reward_loc': 4
+    'reward_loc': 2,
+    'world_dim': 3
 })
 opt['game_action_space_total'] = 2 ** opt.game_comm_bits + opt.game_action_space
 
 
-world_dim = 5
-g = GridGame(opt, (world_dim, world_dim))
+g = GridGame(opt, (opt.world_dim, opt.world_dim))
 g.show(vid=False)
 
-a = Agents(g, world_dim)
+a = Agents(g, opt.world_dim)
 
 tr = Arena(opt, a)
 tr.train()
